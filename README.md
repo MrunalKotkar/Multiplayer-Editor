@@ -13,12 +13,17 @@ persistence model, and what I'd do differently with more time).
   network round trip through the server and back to every other client in the room.
 - Live presence: join with a name, get a random color, see everyone else's caret (with a name
   tag) move as they type, and see the avatar list update the instant someone joins or leaves.
-- A shared language selector (JS/Python) — changing it in one tab updates every tab in the room,
-  the same way the text does, because it lives in the same Yjs document.
+- A shared language selector (JavaScript/TypeScript/Python/Go/Rust/C++/Java) — changing it in one
+  tab updates every tab in the room, the same way the text does, because it lives in the same Yjs
+  document.
 - Persistence in SQLite: a room's content is snapshotted every ~10s and again the moment the last
   person leaves, so killing and restarting the server doesn't lose the document.
-- A "Run" button that actually executes the current code server-side (Node for JS, python3/python
-  for Python) and returns real stdout/stderr — not a mock.
+- A "Run" button that actually executes the current code server-side — Node for JS/TS (TypeScript
+  transpiled in-process, no external toolchain needed), python3/python for Python, `go run` for
+  Go, `rustc`+execute for Rust, `g++`+execute for C++, `javac`+`java` for Java — and returns real
+  stdout/stderr, not a mock. If a language's interpreter/compiler isn't installed on the host, Run
+  shows a clear error for that language instead of crashing; everything else (editing, sync,
+  highlighting) is unaffected.
 
 No demo data, no seeded rooms — a fresh room is genuinely empty until someone types in it.
 
@@ -45,9 +50,12 @@ like production.
 
 ### Try the Run button
 
-Requires `python3` (or `python`) on PATH for Python execution; JavaScript execution just uses the
-same Node binary the server is running on. Note the sandboxing caveat in ARCHITECTURE.md — this is
-not isolated execution, so only run this with people you trust the link with.
+JavaScript and TypeScript need nothing beyond the server's own Node binary. Python needs `python3`
+(or `python`) on PATH; Go needs the `go` toolchain; Rust needs `rustc`; C++ needs `g++`; Java needs
+a JDK (`javac` and `java`). Whichever of those aren't installed on the host, Run reports a clear
+"not found" error for just that language — it doesn't affect editing or the other languages. Note
+the sandboxing caveat in ARCHITECTURE.md — this is not isolated execution, so only run this with
+people you trust the link with.
 
 ## Production build (single process, one origin)
 

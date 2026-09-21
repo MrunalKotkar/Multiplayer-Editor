@@ -6,7 +6,7 @@
 - Anyone with the link can join and type at the same time; no one's edits overwrite anyone else's.
 - Everyone sees everyone else's cursor and selection live, with a name and color.
 - The document survives a page refresh or a server restart — it's persisted, not just kept in memory.
-- Basic syntax highlighting for JS and Python.
+- Basic syntax highlighting for JS/TS, Python, Go, Rust, C++, and PHP.
 
 Explicitly out of scope for the MVP: multi-file support, real auth/login, chat. Stretch, if time
 allows: a "Run" button (server executes the code and returns stdout/stderr), a live avatar list of
@@ -62,11 +62,33 @@ live, never persisted (no reason to store where someone's cursor was a moment ag
 ## Run button (stretch)
 
 A server endpoint takes the current content + language and executes it out-of-process with a hard
-timeout (`child_process`, Node `vm` for JS / shelling to `python3` for Python), returning captured
-stdout/stderr. This is intentionally a simplified sandbox — no container isolation, no resource limits
-beyond a timeout, no filesystem/network restriction. Real infra-grade sandboxing (what Replit actually
-runs) needs per-execution containers or microVMs, resource quotas, and network isolation; that's a
-substantially larger system than this MVP takes on.
+timeout (`child_process`), returning captured stdout/stderr. Per language:
+
+- **JavaScript** — `node -e <code>` directly.
+- **TypeScript** — transpiled to JS in-process with the `typescript` compiler API
+  (`ts.transpileModule`, pinned to the 5.x line for its stable API surface — 7.x is a from-scratch
+  rewrite with a different, still-unstable API), then run the same way as JavaScript. No external
+  toolchain needed.
+- **Python** — shelling to `python3`/`python`.
+- **Go** — writes to a temp `main.go` and shells to `go run`, which compiles and executes in one step.
+- **Rust** — writes to a temp `main.rs`, compiles with `rustc` to a temp binary, then executes it.
+- **C++** — writes to a temp `main.cpp`, compiles with `g++ -std=c++17` to a temp binary, then executes it.
+- **Java** — writes to a temp `<ClassName>.java` (class name extracted from a `public class X` match
+  in the code, defaulting to `Main` so code with no public class still gets a sensible compiler
+  error rather than a filename mismatch error), compiles with `javac`, then runs with
+  `java -cp <dir> <ClassName>`.
+
+Each compiled/interpreted toolchain is detected with a `spawnSync(bin, ['--version'])` probe, cached
+per-process; if a language's toolchain isn't found on the host, `runCode` returns a clear `error`
+field for that language instead of throwing, so a missing `rustc` (say) doesn't affect JS/Python/etc.
+or anything else in the room.
+
+This is intentionally a simplified sandbox — no container isolation, no resource limits beyond a
+timeout, no filesystem/network restriction. Real infra-grade sandboxing (what Replit actually runs)
+needs per-execution containers or microVMs, resource quotas, and network isolation; that's a
+substantially larger system than this MVP takes on. The compiled languages also share a filesystem
+temp directory per run (cleaned up immediately after), so this is even less isolated than the
+interpreted languages — fine for a trusted-link demo, not for arbitrary untrusted code.
 
 ## What I'd do differently with more time
 
