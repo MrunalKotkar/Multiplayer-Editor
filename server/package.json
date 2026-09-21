@@ -12,6 +12,7 @@
     "better-sqlite3": "13.0.3",
     "cors": "2.8.6",
     "express": "5.2.1",
+    "typescript": "^5.9.3",
     "ws": "8.21.3",
     "y-protocols": "1.0.7",
     "y-websocket": "2.0.4",
