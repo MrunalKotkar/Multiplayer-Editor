@@ -1,127 +1,100 @@
 # Mini Multiplayer Editor
 
-A small real-time collaborative code editor. Open a link, land in a shared room, and type
-alongside anyone else with that link — live cursors, live selections, no lost edits, and the
-document survives a refresh or a server restart.
+## What it does
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design writeup (stack choices, data flow,
-persistence model, and what I'd do differently with more time).
+This is a small real-time collaborative code editor. You open a link and land in a shared room. Anyone with that link can type in the same document at the same time. Everyone sees each other's edits and cursors live. The document is still there after a refresh or a server restart.
 
-## What's actually in here
+## Features
 
-- Real CRDT sync (Yjs) over a real WebSocket connection — every character typed is a genuine
-  network round trip through the server and back to every other client in the room.
-- Live presence: join with a name, get a random color, see everyone else's caret (with a name
-  tag) move as they type, and see the avatar list update the instant someone joins or leaves.
-- A shared language selector (JavaScript/TypeScript/Python/Go/Rust/C++/Java) — changing it in one
-  tab updates every tab in the room, the same way the text does, because it lives in the same Yjs
-  document.
-- Persistence in SQLite: a room's content is snapshotted every ~10s and again the moment the last
-  person leaves, so killing and restarting the server doesn't lose the document.
-- A "Run" button that actually executes the current code server-side — Node for JS/TS (TypeScript
-  transpiled in-process, no external toolchain needed), python3/python for Python, `go run` for
-  Go, `rustc`+execute for Rust, `g++`+execute for C++, `javac`+`java` for Java — and returns real
-  stdout/stderr, not a mock. If a language's interpreter/compiler isn't installed on the host, Run
-  shows a clear error for that language instead of crashing; everything else (editing, sync,
-  highlighting) is unaffected.
+- **Edit together.** Many people can type at once, even on the same line. Everyone ends up with the same text. No edit gets lost or overwritten.
+- **See who's here.** You join with a name and get a random color. Everyone's cursor and selection shows up live with a name tag. The avatar list updates when someone joins or leaves.
+- **Shareable rooms.** Every room has its own link. Create one with a single click. Copy the link and send it to a friend.
+- **Nothing gets lost.** The document is saved every few seconds. It is saved again when the last person leaves. A refresh or a restart brings your code back.
+- **Pick a language together.** Choose JavaScript, TypeScript, Python, Go, Rust, C++ or Java. Highlighting changes for everyone in the room at once.
+- **Run your code.** Press Run and the server executes your code. You see the real output and errors in a panel. JavaScript and TypeScript work out of the box. The other languages need their toolchain on the server. If it is missing, you get a clear "not found" message.
+- **Connection status.** A small badge shows if you are connected. You always know if your edits are syncing.
 
-No demo data, no seeded rooms — a fresh room is genuinely empty until someone types in it.
+Run is not a secure sandbox. Code runs as a plain process with a timeout. Only share room links with people you trust.
 
-## Project layout
+## Architecture
 
+```mermaid
+flowchart LR
+  subgraph Browsers["Browsers (one per collaborator)"]
+    UI["React UI<br/>CodeMirror 6 editor"]
+    YC["Yjs document<br/>+ Awareness (cursors, names)"]
+    UI <--> YC
+  end
+
+  subgraph Server["Node.js server (single process, one port)"]
+    STATIC["Express<br/>serves built client"]
+    API["REST API<br/>POST /api/rooms<br/>POST /api/run<br/>GET /api/health"]
+    WS["WebSocket endpoint<br/>/ws/:roomId<br/>(y-websocket)"]
+    ROOMS["In-memory Yjs docs<br/>one per active room"]
+    PERSIST["Persistence layer<br/>snapshot every 10s + on last leave"]
+    RUN["Run executor<br/>child_process + timeout"]
+    WS <--> ROOMS
+    ROOMS --> PERSIST
+    API --> RUN
+  end
+
+  DB[("SQLite<br/>server/data/documents.db")]
+  TOOLS["Language toolchains<br/>node, python, go, rustc, g++, javac"]
+
+  UI -- "HTTP: load app, create room, run code" --> STATIC
+  UI -- "HTTP" --> API
+  YC <-- "WebSocket: binary Yjs updates + awareness" --> WS
+  PERSIST <--> DB
+  RUN --> TOOLS
 ```
-client/    React (Vite) + CodeMirror 6, the editor UI
-server/    Express + ws + y-websocket (server-side) + SQLite persistence
-```
 
-## Running it locally
+**How a keystroke travels.** Yjs turns your edit into a tiny binary update. It goes over the WebSocket to the server. The server relays it to everyone else in the room. Each client merges it into their own copy. CodeMirror redraws because it is bound directly to the Yjs document. Cursor positions use a separate awareness channel on the same socket. They are never stored.
 
-Requires Node 18+.
+**How saving works.** When the first person opens a room, the server loads its last snapshot from SQLite. While the room is active, it saves a snapshot every 10 seconds. It saves once more when the last person leaves.
+
+## Tech stack
+
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19, Vite, Tailwind CSS 4 |
+| Editor | CodeMirror 6 |
+| Real-time sync | Yjs (CRDT), y-codemirror.next, Yjs Awareness |
+| Transport | WebSockets via y-websocket 2.0.4 |
+| Backend | Node.js, Express 5, ws |
+| Storage | SQLite via better-sqlite3 |
+| Code execution | Node child_process, TypeScript compiler API |
+| Hosting | Replit |
+
+## Setup and deployment
+
+You need Node 20 or newer.
+
+### Run it on your machine
 
 ```bash
-npm run install:all   # installs client/ and server/ dependencies
-npm run dev           # runs both dev servers together (client :5173, server :3001)
+npm run install:all
+npm run dev
 ```
 
-Open http://localhost:5173, click **New Room**, then open the room URL in a second (and third)
-browser tab to see it sync live. In dev, Vite proxies `/api` and `/ws` to the server (see
-`client/vite.config.js`), so everything is same-origin from the browser's point of view — exactly
-like production.
+The client runs on port 5173. The server runs on port 3001. Open http://localhost:5173 and click **New Room**. Open the room link in a second tab to see it sync live.
 
-### Try the Run button
+For the Run button, install the toolchain for each extra language you want. That means `python3`, `go`, `rustc`, `g++` or a JDK.
 
-JavaScript and TypeScript need nothing beyond the server's own Node binary. Python needs `python3`
-(or `python`) on PATH; Go needs the `go` toolchain; Rust needs `rustc`; C++ needs `g++`; Java needs
-a JDK (`javac` and `java`). Whichever of those aren't installed on the host, Run reports a clear
-"not found" error for just that language — it doesn't affect editing or the other languages. Note
-the sandboxing caveat in ARCHITECTURE.md — this is not isolated execution, so only run this with
-people you trust the link with.
-
-## Production build (single process, one origin)
+### Production build
 
 ```bash
-npm run build   # builds client/dist
-npm start       # serves the built client + API + WebSocket, all from server/src/index.js
+npm run install:all
+npm run build
+npm start
 ```
 
-The server serves `client/dist` and falls back to `index.html` for client-side routes (`/room/:id`)
-whenever a built client is present, so the whole app is one process on one port — no CORS, no
-reverse-proxy config needed on the host. It listens on `process.env.PORT` if set, `3001` otherwise.
+This serves the client, the API and the WebSocket from one process on one port. The port is `PORT` if set, otherwise 3001.
 
-## Deploying
+### Deploy on Replit
 
-This works on Replit (a bare-bones `.replit` is included) or any host that runs a long-lived Node
-process and gives it a port: Render, Railway, Fly, a plain VM. The steps are the same everywhere:
+The repo has a `.replit` file with a deployment section. Publishing works as it is.
 
-1. `npm run install:all`
-2. `npm run build`
-3. `npm start`
+- **Build** runs once per publish: `npm run install:all && npm run build && npm rebuild better-sqlite3 --build-from-source --prefix server`
+- **Run** starts the app: `npm start`
 
-SQLite persists to `server/data/documents.db` on local disk — on a host with ephemeral/non-persistent
-disk (most serverless platforms), the DB resets on every deploy/restart. For a real deployment on
-such a platform, swap `server/src/db.js` for a hosted Postgres/SQLite (e.g. Turso, Neon) — the rest
-of the persistence code (`server/src/persistence.js`) is written against a tiny `getDocument`/
-`saveDocument` interface specifically so that swap doesn't touch the sync logic.
-
-## Testing sync (what I actually verified, not just what should work)
-
-- Two real browser tabs typing in the same room simultaneously, at different points in the
-  document — no overwrites, both converge to the same text.
-- Three tabs typing concurrently (the plan explicitly calls out that merge bugs often only show up
-  at 3+ editors) — same result, all three converge.
-- Killed the server process mid-session and restarted it — the room's content was still there for
-  the next client to connect, loaded from the SQLite snapshot before that client's first sync
-  message was even sent (see the ordering note in `server/src/persistence.js`).
-- Verified the exact same behavior against the dev setup (Vite + proxy) and the production build
-  (single process, single origin) — not just one or the other.
-
-## Key decisions (worth knowing if you're reading the code)
-
-- **`y-websocket@2.0.4` pinned on both client and server.** Newer `y-websocket` (3.x) dropped the
-  bundled server entirely and became a client-only package — see ARCHITECTURE.md for why 2.0.4 is
-  the last version with both halves, and why pinning matters here specifically.
-- **The Y.Doc/WebsocketProvider are created inside a `useEffect`, not `useMemo`**
-  (`client/src/lib/useYjsRoom.js`). They're a side-effecting external resource (an open socket), and
-  only an effect's mount/cleanup pairing survives React 19 StrictMode's double-invoke in dev
-  correctly — a version built with `useMemo` looked fine in a quick manual check but silently never
-  connected in an automated multi-tab test, because the first (discarded) provider's `.destroy()`
-  call permanently killed the only instance actually in use. This one cost real debugging time and
-  is exactly the kind of bug the plan's "Known rough edges" section warned would be lurking in this
-  binding ecosystem.
-- **No router library.** Two routes (`/` and `/room/:id`) don't justify the dependency; `App.jsx`
-  parses `window.location.pathname` directly.
-- **Language selection lives in the shared Yjs doc, not local component state.** It's a small
-  extra than the plan technically asked for, but it's free (same Y.Map mechanism as everything
-  else) and makes the room feel like one shared space rather than text-only.
-
-## Connecting this to my background
-
-My Credit Suisse work on low-latency market data and this project are the same underlying problem
-in different clothes: correctly handling fast-moving concurrent state where losing or misordering
-an update is the failure mode you design against, whether that update is a price tick or a
-keystroke. The CRDT approach here is the text-editing analogue of the ordering/consistency
-guarantees that mattered there — just solved by merging state instead of sequencing a log.
-
-My UBS work on Elasticsearch-backed indexing is the closer parallel for the persistence layer
-specifically: same underlying question of what to store, how often, and what you're willing to lose
-between snapshots, just applied to a much smaller dataset (one document) here than an index.
+Autoscale disks are not persistent. Saved documents reset when an instance restarts. To keep them, use a Reserved VM or swap `server/src/db.js` for a hosted database.
